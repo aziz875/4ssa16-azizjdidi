@@ -8,7 +8,8 @@ pipeline {
 
     environment {
         DOCKERHUB_USER = 'azizj11'
-        IMAGE_NAME     = 'azizjdidi-4ssa16-appgestiondesprojets'
+        BACKEND_IMAGE  = 'azizjdidi-4ssa16-appgestiondesprojets'
+        FRONTEND_IMAGE = 'azizjdidi-4ssa16-frontend'
         SONAR_URL      = 'http://localhost:9000'
         MAVEN_OPTS     = '-Djava.net.preferIPv4Stack=true'
     }
@@ -45,19 +46,19 @@ pipeline {
 
         stage('Docker Build & Push') {
             steps {
-                dir('backend') {
-                    withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                        sh '''
-                            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                            docker build -t ${DOCKERHUB_USER}/${IMAGE_NAME}:latest .
-                            docker push ${DOCKERHUB_USER}/${IMAGE_NAME}:latest
-                        '''
-                    }
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh '''
+                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        docker build -t ${DOCKERHUB_USER}/${BACKEND_IMAGE}:latest ./backend
+                        docker push ${DOCKERHUB_USER}/${BACKEND_IMAGE}:latest
+                        docker build -t ${DOCKERHUB_USER}/${FRONTEND_IMAGE}:latest ./frontend
+                        docker push ${DOCKERHUB_USER}/${FRONTEND_IMAGE}:latest
+                    '''
                 }
             }
         }
 
-        stage('Deploy Container') {
+        stage('Deploy Containers') {
             steps {
                 sh '''
                     docker rm -f devops-backend || true
@@ -69,7 +70,15 @@ pipeline {
                       -e SPRING_DATASOURCE_URL="jdbc:mysql://devops-mysql:3306/test_db?createDatabaseIfNotExist=true" \
                       -e SPRING_DATASOURCE_USERNAME=root \
                       -e SPRING_DATASOURCE_PASSWORD=root \
-                      ${DOCKERHUB_USER}/${IMAGE_NAME}:latest
+                      ${DOCKERHUB_USER}/${BACKEND_IMAGE}:latest
+
+                    docker rm -f devops-frontend || true
+                    docker run -d \
+                      --name devops-frontend \
+                      --network devops-stack_default \
+                      --restart unless-stopped \
+                      -p 4200:80 \
+                      ${DOCKERHUB_USER}/${FRONTEND_IMAGE}:latest
                 '''
             }
         }
