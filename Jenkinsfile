@@ -1,0 +1,77 @@
+pipeline {
+    agent any
+
+    tools {
+        jdk 'JAVA_HOME'
+        maven 'M2_HOME'
+    }
+
+    environment {
+        DOCKERHUB_USER = 'azizj11'
+        IMAGE_NAME     = 'azizjdidi-4ssa16-appgestiondesprojets'
+        SONAR_URL      = 'http://localhost:9000'
+        MAVEN_OPTS     = '-Djava.net.preferIPv4Stack=true'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Maven Build') {
+            steps {
+                dir('backend') {
+                    sh 'mvn -B clean package -DskipTests'
+                }
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                dir('backend') {
+                    withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
+                        sh '''
+                            mvn -B org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
+                              -Dsonar.projectKey=devops-backend \
+                              -Dsonar.host.url=${SONAR_URL} \
+                              -Dsonar.token=${SONAR_TOKEN}
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Docker Build & Push') {
+            steps {
+                dir('backend') {
+                    withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        sh '''
+                            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                            docker build -t ${DOCKERHUB_USER}/${IMAGE_NAME}:latest .
+                            docker push ${DOCKERHUB_USER}/${IMAGE_NAME}:latest
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Deploy Container') {
+            steps {
+                sh '''
+                    docker rm -f devops-backend || true
+                    docker run -d \
+                      --name devops-backend \
+                      --network devops-stack_default \
+                      --restart unless-stopped \
+                      -p 8081:8081 \
+                      -e SPRING_DATASOURCE_URL="jdbc:mysql://devops-mysql:3306/test_db?createDatabaseIfNotExist=true" \
+                      -e SPRING_DATASOURCE_USERNAME=root \
+                      -e SPRING_DATASOURCE_PASSWORD=root \
+                      ${DOCKERHUB_USER}/${IMAGE_NAME}:latest
+                '''
+            }
+        }
+    }
+}
