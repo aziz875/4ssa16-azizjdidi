@@ -1,0 +1,42 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKERHUB_USER = 'azizj11'
+        FRONTEND_IMAGE = 'azizjdidi-4ssa16-frontend'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Docker Build & Push') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh '''
+                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        docker build -t ${DOCKERHUB_USER}/${FRONTEND_IMAGE}:latest ./frontend
+                        docker push ${DOCKERHUB_USER}/${FRONTEND_IMAGE}:latest
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy Frontend') {
+            steps {
+                sh '''
+                    docker rm -f devops-frontend || true
+                    docker run -d \
+                      --name devops-frontend \
+                      --network devops-stack_default \
+                      --restart unless-stopped \
+                      -p 4200:80 \
+                      ${DOCKERHUB_USER}/${FRONTEND_IMAGE}:latest
+                '''
+            }
+        }
+    }
+}
